@@ -421,4 +421,252 @@ export const tests = [
       assert(run.status === "failed", "failure status is preserved in the summary");
     },
   },
+  {
+    name: "locally vendored Three.js revision is pinned",
+    async run() {
+      const { REVISION } = await import("../vendor/three/three.module.js");
+      assert(REVISION === "180", `expected Three.js r180, got r${REVISION}`);
+    },
+  },
+  {
+    name: "feedback event preserves the selected route and resolved result",
+    async run() {
+      const { createDecisionFeedbackEvent } =
+        await import("../src/render/feedback-event.js");
+      const scenario = {
+        packet: { id: "packet-1", destination: "10.1.1.9" },
+        routes: [
+          {
+            id: "broad",
+            nextHopId: "hop-broad",
+            nextHopLabel: "Broad next hop",
+            networkAddress: "10.1.0.0",
+            prefixLength: 16,
+          },
+          {
+            id: "specific",
+            nextHopId: "hop-specific",
+            nextHopLabel: "Specific next hop",
+            networkAddress: "10.1.1.0",
+            prefixLength: 24,
+          },
+        ],
+      };
+      const event = createDecisionFeedbackEvent({
+        scenario,
+        evaluation: { winnerRouteId: "specific", ruleCode: "longest-prefix" },
+        selectedNextHopId: "hop-broad",
+        decisionStatus: "wrong",
+        explanation: "The /24 route wins.",
+      });
+
+      assert(event.selectedRoute.id === "broad", "retain the player's chosen route");
+      assert(event.selectedRouteIndex === 0, "use the selected route's scenario position");
+      assert(event.winningRoute.id === "specific", "retain the evaluator's winner");
+      assert(event.winningRouteIndex === 1, "retain the winner's scenario position");
+      assert(event.routes.length === 2, "include all candidate routers in the topology");
+      assert(Object.isFrozen(event.routes), "candidate route list must be immutable");
+      assert(event.decisionStatus === "wrong", "preserve the resolver's result");
+      assert(event.ruleCode === "longest-prefix", "preserve the deciding rule");
+      assert(Object.isFrozen(event), "event must be immutable");
+      assert(Object.isFrozen(event.selectedRoute), "selected route must be immutable");
+      const correctEvent = createDecisionFeedbackEvent({
+        scenario,
+        evaluation: { winnerRouteId: "specific", ruleCode: "longest-prefix" },
+        selectedNextHopId: "hop-specific",
+        decisionStatus: "correct",
+        explanation: "The /24 route wins.",
+      });
+      assert(correctEvent.selectedRouteIndex === 1, "second candidate keeps its route position");
+      assert(correctEvent.winningRouteIndex === 1, "correct event targets the winning router");
+    },
+  },
+  {
+    name: "packet animation follows the selected wrong route and the winning correct route",
+    async run() {
+      const { getPacketRouteIndex, getRouteVisualState } =
+        await import("../src/render/route-feedback.js");
+      const indexes = { selectedRouteIndex: 0, winningRouteIndex: 1 };
+      const wrongEvent = { ...indexes, decisionStatus: "wrong" };
+      assert(
+        getPacketRouteIndex(wrongEvent) === 0,
+        "a wrong answer sends the packet to the selected router",
+      );
+      const wrongSelectedTravel = getRouteVisualState(wrongEvent, 0, false);
+      assert(
+        wrongSelectedTravel.branchState === "active" &&
+          wrongSelectedTravel.routerState === "neutral",
+        "the wrong router stays neutral while the packet follows its active path",
+      );
+      const wrongSelectedLanded = getRouteVisualState(wrongEvent, 0, true);
+      const wrongWinnerLanded = getRouteVisualState(wrongEvent, 1, true);
+      assert(
+        wrongSelectedLanded.branchState === "incorrect" &&
+          wrongSelectedLanded.routerState === "incorrect",
+        "the selected wrong route turns red when the packet arrives",
+      );
+      assert(
+        wrongWinnerLanded.branchState === "correct" &&
+          wrongWinnerLanded.routerState === "correct",
+        "the winning route turns green when the animation settles",
+      );
+      const correctEvent = { ...indexes, decisionStatus: "correct" };
+      assert(
+        getPacketRouteIndex(correctEvent) === 1,
+        "a correct answer sends the packet to the winning router",
+      );
+      const correctTravel = getRouteVisualState(correctEvent, 1, false);
+      const correctLanded = getRouteVisualState(correctEvent, 1, true);
+      assert(
+        correctTravel.routerState === "neutral" &&
+          correctLanded.routerState === "correct",
+        "the correct router turns green only when the packet arrives",
+      );
+    },
+  },
+  {
+    name: "feedback event rejects a selected next hop outside the scenario",
+    async run() {
+      const { createDecisionFeedbackEvent } =
+        await import("../src/render/feedback-event.js");
+      let threw = false;
+      try {
+        createDecisionFeedbackEvent({
+          scenario: {
+            packet: { id: "packet-1", destination: "10.1.1.9" },
+            routes: [],
+          },
+          evaluation: { winnerRouteId: "missing", ruleCode: "longest-prefix" },
+          selectedNextHopId: "missing",
+          decisionStatus: "wrong",
+          explanation: "No candidate route exists.",
+        });
+      } catch {
+        threw = true;
+      }
+      assert(threw, "invalid route references must be reported");
+    },
+  },
+  {
+    name: "feedback screen retains its accessible explanation and has a decorative scene host",
+    async run({ levels }) {
+      const { evaluateRoutes } = await import("../src/routing/evaluate.js");
+      const { renderFeedback } = await import("../src/ui/views.js");
+      const { createRun } = await import("../src/game/session.js");
+      const routes = [
+        {
+          id: "broad",
+          nextHopId: "hop-broad",
+          nextHopLabel: "Broad next hop",
+          addressFamily: "ipv4",
+          networkAddress: "10.1.0.0",
+          prefixLength: 16,
+          protocol: "static",
+          administrativeDistance: 1,
+          metric: null,
+        },
+        {
+          id: "specific",
+          nextHopId: "hop-specific",
+          nextHopLabel: "Specific next hop",
+          addressFamily: "ipv4",
+          networkAddress: "10.1.1.0",
+          prefixLength: 24,
+          protocol: "static",
+          administrativeDistance: 1,
+          metric: null,
+        },
+      ];
+      const scenario = {
+        packet: { id: "packet-1", destination: "10.1.1.9" },
+        routes,
+      };
+      const evaluation = evaluateRoutes(scenario.packet.destination, routes);
+      const root = document.createElement("main");
+      renderFeedback(root, {
+        run: createRun(20261117),
+        level: levels.levels[0],
+        scenario,
+        selectedNextHopId: "hop-specific",
+        evaluation,
+        decisionStatus: "correct",
+        onContinue() {},
+      });
+
+      assert(root.querySelector(".feedback-card[role=status]"), "2D status remains present");
+      assert(root.querySelector(".explanation")?.textContent.includes("/24"), "rule explanation remains in the DOM");
+      const host = root.querySelector(".route-feedback-scene");
+      assert(host, "feedback screen provides a scene host");
+      assert(host.getAttribute("aria-hidden") === "true", "scene host is decorative");
+      assert(!host.hasAttribute("tabindex"), "scene host does not receive keyboard focus");
+    },
+  },
+  {
+    name: "visual fallback notice preserves immediate 2D decision feedback",
+    async run({ levels }) {
+      const { evaluateRoutes } = await import("../src/routing/evaluate.js");
+      const { beginPacket, createRun, resolveDecision, startRun } =
+        await import("../src/game/session.js");
+      const {
+        decisionExplanation,
+        renderFeedback,
+        showFeedbackVisualUnavailable,
+      } = await import("../src/ui/views.js");
+      const routes = [
+        {
+          id: "broad",
+          nextHopId: "hop-broad",
+          nextHopLabel: "Broad next hop",
+          addressFamily: "ipv4",
+          networkAddress: "10.1.0.0",
+          prefixLength: 16,
+          protocol: "static",
+          administrativeDistance: 1,
+          metric: null,
+        },
+        {
+          id: "specific",
+          nextHopId: "hop-specific",
+          nextHopLabel: "Specific next hop",
+          addressFamily: "ipv4",
+          networkAddress: "10.1.1.0",
+          prefixLength: 24,
+          protocol: "static",
+          administrativeDistance: 1,
+          metric: null,
+        },
+      ];
+      const scenario = {
+        packet: { id: "packet-1", destination: "10.1.1.9" },
+        routes,
+      };
+      const evaluation = evaluateRoutes(scenario.packet.destination, routes);
+      const decision = resolveDecision(beginPacket(startRun(createRun(20261117))), {
+        packetId: scenario.packet.id,
+        selectedNextHopId: "hop-broad",
+        winningNextHopId: "hop-specific",
+      });
+      const root = document.createElement("main");
+      renderFeedback(root, {
+        run: decision.run,
+        level: levels.levels[0],
+        scenario,
+        selectedNextHopId: "hop-broad",
+        evaluation,
+        decisionStatus: decision.status,
+        explanation: decisionExplanation(evaluation, routes),
+        onContinue() {},
+      });
+      showFeedbackVisualUnavailable(root);
+
+      const notice = root.querySelector(".route-feedback-notice");
+      const status = root.querySelector(".feedback-card");
+      assert(notice && !notice.hidden, "3D failure is announced without blocking play");
+      assert(status?.textContent.includes("−50 points"), "2D outcome remains immediate");
+      assert(status?.textContent.includes("You selected Broad next hop"), "selected route remains named");
+      assert(status?.textContent.includes("/24 beats /16"), "rule explanation remains available");
+      assert(status?.textContent.includes("Score -50 · Lives 4 · Pressure 1/5"), "game state is unchanged");
+      assert(root.querySelector(".primary-button"), "existing continue control remains available");
+    },
+  },
 ];

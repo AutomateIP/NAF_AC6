@@ -309,7 +309,16 @@ export function renderPlaying(
 
 export function renderFeedback(
   root,
-  { run, level, scenario, selectedNextHopId, evaluation, decisionStatus, onContinue },
+  {
+    run,
+    level,
+    scenario,
+    selectedNextHopId,
+    evaluation,
+    decisionStatus,
+    explanation,
+    onContinue,
+  },
 ) {
   const isCorrect = decisionStatus === "correct";
   const isMissed = decisionStatus === "missed";
@@ -323,6 +332,19 @@ export function renderFeedback(
   );
   result.setAttribute("role", "status");
   result.setAttribute("aria-live", "polite");
+  let feedbackSceneHost = null;
+  if (selectedNextHopId) {
+    feedbackSceneHost = node("div", "route-feedback-scene");
+    feedbackSceneHost.setAttribute("aria-hidden", "true");
+    result.append(feedbackSceneHost);
+    const visualNotice = node(
+      "p",
+      "route-feedback-notice",
+      "3D route visuals are unavailable. Use the route explanation below.",
+    );
+    visualNotice.hidden = true;
+    result.append(visualNotice);
+  }
   result.append(
     node(
       "p",
@@ -358,7 +380,11 @@ export function renderFeedback(
     );
   }
   result.append(
-    node("p", "explanation", decisionExplanation(evaluation, scenario.routes)),
+    node(
+      "p",
+      "explanation",
+      explanation ?? decisionExplanation(evaluation, scenario.routes),
+    ),
   );
   result.append(
     node(
@@ -384,6 +410,15 @@ export function renderFeedback(
   screen.append(result);
   setPage(root, screen);
   root.querySelector("button")?.focus();
+  return feedbackSceneHost;
+}
+
+export function showFeedbackVisualUnavailable(root) {
+  const notice = root.querySelector(".route-feedback-notice");
+  if (!notice) {
+    throw new Error("The feedback visual notice is missing");
+  }
+  notice.hidden = false;
 }
 
 export function renderPaused(root, { run, onResume, onRestart }) {

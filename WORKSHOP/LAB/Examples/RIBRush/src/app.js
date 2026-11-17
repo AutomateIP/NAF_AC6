@@ -12,8 +12,10 @@ import {
 } from "./game/session.js";
 import { generateScenario } from "./routing/generate.js";
 import { validateScenario } from "./routing/validate.js";
+import { createDecisionFeedbackEvent } from "./render/feedback-event.js";
 import {
   attachMuteControl,
+  decisionExplanation,
   renderBriefing,
   renderError,
   renderFeedback,
@@ -21,6 +23,7 @@ import {
   renderPlaying,
   renderStart,
   renderSummary,
+  showFeedbackVisualUnavailable,
 } from "./ui/views.js";
 
 const BASE_PACKET_TIME_MS = 10000;
@@ -41,6 +44,8 @@ let packetDeadline = 0;
 let packetTimerInterval = null;
 let packetDuration = BASE_PACKET_TIME_MS;
 let remainingPacketTime = BASE_PACKET_TIME_MS;
+let routeFeedbackView = null;
+let routeFeedbackUnavailable = false;
 
 function currentLevel() {
   const level = levels[run.levelIndex];
@@ -83,6 +88,45 @@ function showError(error) {
     () => window.location.reload(),
   );
   attachSoundControl();
+}
+
+function disableRouteFeedback(error) {
+  routeFeedbackUnavailable = true;
+  routeFeedbackView?.dispose();
+  routeFeedbackView = null;
+  console.error("RIBRush 3D route feedback is unavailable", error);
+  if (screen === "feedback") {
+    showFeedbackVisualUnavailable(root);
+  }
+}
+
+async function presentRouteFeedback(event, host) {
+  if (!host) {
+    return;
+  }
+  if (routeFeedbackUnavailable) {
+    showFeedbackVisualUnavailable(root);
+    return;
+  }
+
+  try {
+    if (!routeFeedbackView) {
+      const { createRouteFeedbackView } =
+        await import("./render/route-feedback.js");
+      if (screen !== "feedback" || !host.isConnected) {
+        return;
+      }
+      routeFeedbackView = createRouteFeedbackView({
+        onUnavailable: disableRouteFeedback,
+      });
+    }
+    if (screen !== "feedback" || !host.isConnected) {
+      return;
+    }
+    routeFeedbackView.present(event, host);
+  } catch (error) {
+    disableRouteFeedback(error);
+  }
 }
 
 function handleMiss() {
@@ -238,19 +282,30 @@ function submitDecision() {
   run = decision.run;
   screen = "feedback";
   audio.play(decision.status);
-  renderFeedback(root, {
+  const explanation = decisionExplanation(evaluation, scenario.routes);
+  const feedbackEvent = createDecisionFeedbackEvent({
+    scenario,
+    evaluation,
+    selectedNextHopId: run.selectedNextHopId,
+    decisionStatus: decision.status,
+    explanation,
+  });
+  const feedbackHost = renderFeedback(root, {
     run,
     level: currentLevel(),
     scenario,
     selectedNextHopId: run.selectedNextHopId,
     evaluation,
     decisionStatus: decision.status,
+    explanation,
     onContinue: advanceFromFeedback,
   });
   attachSoundControl();
+  void presentRouteFeedback(feedbackEvent, feedbackHost);
 }
 
 function advanceFromFeedback() {
+  routeFeedbackView?.stop();
   try {
     run = continueAfterFeedback(run, currentLevel().packetCount, levels.length);
     if (run.currentView === "playing") {
@@ -380,6 +435,11 @@ async function initialize() {
   attachSoundControl();
   document.addEventListener("keydown", handleKeydown);
 }
+
+window.addEventListener("pagehide", () => {
+  routeFeedbackView?.dispose();
+  routeFeedbackView = null;
+});
 
 initialize().catch((error) => {
   showError(error instanceof Error ? error : new Error(String(error)));

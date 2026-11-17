@@ -6,7 +6,8 @@ agent context is left unchanged.
 ## Active Technologies
 
 - Static HTML5, CSS, and native ECMAScript modules
-- No framework, bundler, runtime package, backend, or persistent storage
+- Optional, locally vendored and version-pinned Three.js for decorative route feedback
+- No framework, bundler, package manager, backend, or persistent storage
 - Browser APIs only; no external runtime requests
 
 ## Project Structure
@@ -14,9 +15,11 @@ agent context is left unchanged.
 ```text
 src/routing/  Address handling, evaluation, generation, and validation
 src/game/     In-memory run state and transitions
+src/render/   Optional presentation-only 3D route feedback
 src/ui/       Screens, keyboard controls, and feedback
 src/audio/    Optional original sound cues
 data/         Level definitions and generation constraints
+vendor/three/ Locally pinned Three.js runtime files and license notice
 tests/        Browser test runner and independent fixtures
 ```
 

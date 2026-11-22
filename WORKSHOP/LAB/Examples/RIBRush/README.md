@@ -56,3 +56,14 @@ counts and visibly fail if no fixtures are discovered.
   and level-data requests; no external runtime requests were made.
 - The required five-person formative network-engineer playtest has not been
   conducted and remains a release criterion.
+
+## Community Arcade
+
+RIBRush is published in the Automate Your Network community Arcade:
+
+- [Game page and build story](https://automateyournetwork.com/arcade/ribrush/)
+- [Play RIBRush](https://automateyournetwork.com/arcade/play/ribrush/)
+- [AutoCon 6 workshop recap: I hoped for six games. They built an arcade.](https://automateyournetwork.com/arcade/field-notes/)
+
+The Arcade publication workflow and submission template are available at
+[Add your game](https://automateyournetwork.com/arcade/#submit).
